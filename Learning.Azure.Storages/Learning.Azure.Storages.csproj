@@ -7,4 +7,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Azure.Storage.Files.Shares" Version="12.11.0" />
+    <PackageReference Include="ConsoleAppFramework" Version="4.2.2" />
+  </ItemGroup>
+
 </Project>
