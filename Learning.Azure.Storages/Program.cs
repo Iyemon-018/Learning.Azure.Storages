@@ -1,6 +1,8 @@
 ﻿// See https://aka.ms/new-console-template for more information
 using System.Text;
+using Azure;
 using Azure.Storage.Files.Shares;
+using Azure.Storage.Files.Shares.Models;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 
@@ -53,7 +55,7 @@ public class AzureFilesRunner : ConsoleAppBase
         // 3. ファイルクライアントを作ってアップロードする。
         // ここではローカルで作るファイルとアップロードするファイル名は一致させているけど、別名でもOK。
         // まずは ShareFileClient オブジェクトを作っておく。
-        string           fileName = $"{DateTime.Now: yyyy-MM-dd_HHmmssfff}.txt";
+        string           fileName = $"{DateTime.Now:yyyy-MM-dd_HHmmssfff}.txt";
         ShareFileClient? file     = directory.GetFileClient(fileName);
         await file.DeleteIfExistsAsync();
 
@@ -66,6 +68,45 @@ public class AzureFilesRunner : ConsoleAppBase
         // .CreateAsync(length) と .Upload(Stream) はセットで考える。
         await file.CreateAsync(stream.Length);
         await file.UploadAsync(stream);
+    }
+
+    // e.g. > Learning.Azure.Storages.exe download --directory "Logs" --file-name " 2022-08-17_235643613.txt" --output "2022-08-17_235643613.txt"
+    public async Task Download(string directory, string fileName, string output)
+    {
+        // ダウンロードはアップロードと下準備はほぼ同じ。
+        ShareClient share = new ShareClient(_appSettings.connectionString, _appSettings.shareName);
+
+        if (!await share.ExistsAsync()) return;
+
+        ShareDirectoryClient? directoryClient = share.GetDirectoryClient(directory);
+        if (!await directoryClient.ExistsAsync())
+        {
+            Console.WriteLine($"Directory not found [{directory}].");
+            return;
+        }
+        
+        // 何故か .GetFileClient(fileName) の fileName の先頭に" "(半角スペース)を入れないとファイルが見つからない。
+        // 原因がよくわからない。
+        // ファイル名の先頭が数値だから…？
+        ShareFileClient? file = directoryClient.GetFileClient(fileName);
+        if (!await file.ExistsAsync())
+        {
+            Console.WriteLine($"File not found [{Path.Combine(directory, fileName)}].");
+            return;
+        }
+
+        Console.WriteLine($"Downloading [{Path.Combine(directory, fileName)}].");
+
+        // ファイルはダウンロードしてから Stream として出力する。
+        Response<ShareFileDownloadInfo>? download = await file.DownloadAsync();
+        
+        await using var fileStream = File.OpenWrite(output);
+        await download.Value.Content.CopyToAsync(fileStream);
+        await fileStream.FlushAsync();
+
+        fileStream.Close();
+
+        Console.WriteLine($"File download completed. > {output}");
     }
 }
 
