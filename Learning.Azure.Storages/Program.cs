@@ -1,12 +1,11 @@
 ﻿// See https://aka.ms/new-console-template for more information
-using System.Text;
+
 using Azure;
 using Azure.Storage.Files.Shares;
 using Azure.Storage.Files.Shares.Models;
+using Azure.Storage.Files.Shares.Specialized;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-
-Console.WriteLine("Hello, World!");
 
 var console = ConsoleApp.CreateBuilder(args)
                         .ConfigureServices((hostContext, services) =>
@@ -100,13 +99,76 @@ public class AzureFilesRunner : ConsoleAppBase
         // ファイルはダウンロードしてから Stream として出力する。
         Response<ShareFileDownloadInfo>? download = await file.DownloadAsync();
         
-        await using var fileStream = File.OpenWrite(output);
+        await using FileStream fileStream = File.OpenWrite(output);
         await download.Value.Content.CopyToAsync(fileStream);
         await fileStream.FlushAsync();
 
         fileStream.Close();
 
         Console.WriteLine($"File download completed. > {output}");
+    }
+
+    // 指定したパスのファイル、フォルダ名を列挙する。
+    // e.g. > Learning.Azure.Storages.exe dir --path "Logs"
+    public async Task Dir(string path)
+    {
+        ShareDirectoryClient directory = new ShareDirectoryClient(_appSettings.connectionString, _appSettings.shareName, path);
+        if (!await directory.ExistsAsync())
+        {
+            Console.WriteLine($"Failed: Directory not found [{path}].");
+            return;
+        }
+
+        // ファイルとフォルダを取得する場合は .GetFilesAndDirectoriesAsync() でできる。
+        // 第一引数で prefix を指定することもできる。
+        // prefix 以外は指定することができないので suffix やもっと細かい条件はループ内で行う必要がある。
+        await foreach (ShareFileItem? item in directory.GetFilesAndDirectoriesAsync())
+        {
+            string? fullPath = item.Name;
+            if (!item.IsDirectory)
+            {
+                ShareFileClient? file = directory.GetFileClient(item.Name);
+                fullPath = file.Path;
+            }
+
+            Console.WriteLine($"- [{fullPath}]");
+        }
+    }
+
+    // 同一共有名内でファイル コピーする。
+    // e.g. > Learning.Azure.Storages.exe copy-file --source "Logs/ 2022-08-18_234830982.txt" --destination "Logs/_2022-08-18_234830982.txt"
+    public async Task CopyFile(string source, string destination)
+    {
+        // パスさえ指定できれば直接ファイル クライアントを作ることもできる。
+        ShareFileClient src = new ShareFileClient(_appSettings.connectionString, _appSettings.shareName, source);
+
+        if (!await src.ExistsAsync())
+        {
+            Console.WriteLine($"Failed: File not found [{source}].");
+            return;
+        }
+
+        // コピー先のファイル クライアントから親ディレクトリ クライアントを参照する。
+        // コピー先のディレクトリが存在するかどうかのチェックはこれでできる。
+        // やろうと思えば別共有名に移動することもできそう。(接続文字列が同じであれば）
+        ShareFileClient       dest   = new ShareFileClient(_appSettings.connectionString, _appSettings.shareName, destination);
+        ShareDirectoryClient? parent = dest.GetParentShareDirectoryClient();
+        if (!await parent.ExistsAsync())
+        {
+            Console.WriteLine($"Failed: Destination directory not found [{parent.Path}].");
+            return;
+        }
+
+        // コピーは .StartCopyAsync でできる。コピー元は Uri を指定する。
+        await dest.StartCopyAsync(src.Uri);
+
+        if (!await dest.ExistsAsync())
+        {
+            Console.WriteLine($"Failed: File not copied [{dest}].");
+            return;
+        }
+
+        Console.WriteLine($"Success: File copied. [{source}] -> [{destination}]");
     }
 }
 
