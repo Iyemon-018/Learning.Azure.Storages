@@ -108,6 +108,74 @@ public class AzureFilesRunner : ConsoleAppBase
         Console.WriteLine($"File download completed. > {output}");
     }
 
+
+    // e.g. > Learning.Azure.Storages.exe download-dir --directory "Logs" --destination .
+    public async Task DownloadDir(string directory, string destination)
+    {
+        // ダウンロードはアップロードと下準備はほぼ同じ。
+        ShareClient share = new ShareClient(_appSettings.connectionString, _appSettings.shareName);
+
+        if (!await share.ExistsAsync()) return;
+
+        ShareDirectoryClient? directoryClient = share.GetDirectoryClient(directory);
+        if (!await directoryClient.ExistsAsync())
+        {
+            Console.WriteLine($"Directory not found [{directory}].");
+            return;
+        }
+
+        await DownloadFiles(directoryClient, destination);
+    }
+
+    private async Task DownloadFiles(ShareDirectoryClient directoryClient, string destination)
+    {
+        if (!directoryClient.GetFilesAndDirectories().Any())
+        {
+
+            // ディレクトリ内が空のケース
+            // このフォルダもコピーしたい場合はこれが必要になる。
+            var output = Path.Combine(destination, directoryClient.Path);
+
+            Console.WriteLine($"空のディレクトリ[{directoryClient.Path}]を[{output}]へ作成します。");
+
+            if (!Directory.Exists(output)) Directory.CreateDirectory(output);
+            return;
+        }
+
+        await foreach (var item in directoryClient.GetFilesAndDirectoriesAsync())
+        {
+            if (item.IsDirectory)
+            {
+                // 再帰してサブディレクトリをコピーする
+                await DownloadFiles(directoryClient.GetSubdirectoryClient(item.Name), destination);
+            }
+            else
+            {
+                var fileClient = directoryClient.GetFileClient(item.Name);
+                if (await fileClient.ExistsAsync())
+                {
+                    // ディレクトリごとコピーするのでフォルダがなければ作る必要あり。
+                    var output = Path.Combine(destination, fileClient.Path);
+                    var dir    = Path.GetDirectoryName(output);
+                    if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
+
+                    Console.WriteLine($"[{fileClient.Path}]から[{output}]へコピーを開始します。");
+
+                    // ファイルはダウンロードしてから Stream として出力する。
+                    Response<ShareFileDownloadInfo>? download = await fileClient.DownloadAsync();
+
+                    await using var fileStream = File.OpenWrite(output);
+                    await download.Value.Content.CopyToAsync(fileStream);
+                    await fileStream.FlushAsync();
+
+                    fileStream.Close();
+
+                    Console.WriteLine($"[{fileClient.Path}]から[{output}]へコピーを完了しました。");
+                }
+            }
+        }
+    }
+
     // 指定したパスのファイル、フォルダ名を列挙する。
     // e.g. > Learning.Azure.Storages.exe dir --path "Logs"
     public async Task Dir(string path)
