@@ -54,7 +54,11 @@ public class AzureFilesRunner : ConsoleAppBase
         // 3. ファイルクライアントを作ってアップロードする。
         // ここではローカルで作るファイルとアップロードするファイル名は一致させているけど、別名でもOK。
         // まずは ShareFileClient オブジェクトを作っておく。
-        string           fileName = $"{DateTime.Now:yyyy-MM-dd_HHmmssfff}.txt";
+        // note: Files にアップロードするファイルは先頭が数値だと自動的に" "(半角スペース)が含まれる。
+        //       ローカルで"2022-08-10_001122333.txt"というファイル名だとしても、Azure Files にアップロードすると
+        //       " 2022-08-10_001122333.txt"になる。これは Files の仕様？
+        //       先頭がアルファベットなら発生しない。先頭が数値以外でも発生するかどうかは不明。
+        string fileName = $"test-{DateTime.Now:yyyy-MM-dd_HHmmssfff}.txt";
         ShareFileClient? file     = directory.GetFileClient(fileName);
         await file.DeleteIfExistsAsync();
 
