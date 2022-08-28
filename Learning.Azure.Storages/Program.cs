@@ -73,6 +73,43 @@ public class AzureFilesRunner : ConsoleAppBase
         await file.UploadAsync(stream);
     }
 
+    public async Task UploadDir(string source, string destination)
+    {
+        ShareClient share = new ShareClient(_appSettings.connectionString, _appSettings.shareName);
+
+        ShareDirectoryClient directoryClient = share.GetDirectoryClient(destination);
+
+        // ディレクトリの捜索とアップロードを並行して行う。
+        await UploadDirRecurse(source, directoryClient);
+    }
+
+    private async Task UploadDirRecurse(string source, ShareDirectoryClient directoryClient)
+    {
+        // 予め指定されたディレクトリを作成しないと、このディレクトリ配下のファイルを作成することができない。
+        await directoryClient.CreateIfNotExistsAsync();
+
+        foreach (var file in Directory.GetFiles(source))
+        {
+            // このディレクトリ配下のファイルをすべてアップロードする。
+            string fileName = Path.GetFileName(file);
+
+            ShareFileClient fileClient = directoryClient.GetFileClient(fileName);
+
+            await using FileStream stream = File.OpenRead(file);
+
+            await fileClient.CreateAsync(stream.Length);
+            await fileClient.UploadAsync(stream);
+        }
+
+        foreach (var directory in Directory.GetDirectories(source))
+        {
+            // サブディレクトリがあれば同じように作る。
+            // ここで、サブディレクトリが空であってもこのメソッドの最上位の .CreateIfNotExistsAsync が呼ばれるので空フォルダの作り忘れがなくなる。
+            var directoryInfo = new DirectoryInfo(directory);
+            await UploadDirRecurse(directory, directoryClient.GetSubdirectoryClient(directoryInfo.Name));
+        }
+    }
+
     // e.g. > Learning.Azure.Storages.exe download --directory "Logs" --file-name " 2022-08-17_235643613.txt" --output "2022-08-17_235643613.txt"
     public async Task Download(string directory, string fileName, string output)
     {
@@ -111,7 +148,7 @@ public class AzureFilesRunner : ConsoleAppBase
 
         Console.WriteLine($"File download completed. > {output}");
     }
-
+    
 
     // e.g. > Learning.Azure.Storages.exe download-dir --directory "Logs" --destination .
     public async Task DownloadDir(string directory, string destination)
